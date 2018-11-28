@@ -98,7 +98,7 @@ def tf_summary_image(image, bboxes, name='image', unwhitened=False):
     image = tf.expand_dims(image, 0)
     bboxes = tf.expand_dims(bboxes, 0)
     image_with_box = tf.image.draw_bounding_boxes(image, bboxes)
-    tf.summary.image(name, image_with_box)
+    #tf.summary.image(name, image_with_box)
 
 
 def apply_with_random_selector(x, func, num_cases):
@@ -259,6 +259,9 @@ def preprocess_for_train(image, labels, bboxes,
         # Convert to float scaled [0, 1].
         if image.dtype != tf.float32:
             image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+        #bboxes = tf.Print(bboxes, [bboxes,' bboxes I get here'],message='Debug message:',summarize=100)
+        #image = tf.Print(image, [image,' image I get here'],message='Debug message:',summarize=100)
+        
         tf_summary_image(image, bboxes, 'image_with_bboxes')
 
         # # Remove DontCare labels.
@@ -277,6 +280,7 @@ def preprocess_for_train(image, labels, bboxes,
                                           method=tf.image.ResizeMethod.BILINEAR,
                                           align_corners=False)
         tf_summary_image(dst_image, bboxes, 'image_shape_distorted')
+        #dst_image = tf.Print(dst_image, [dst_image,' image resized here'],message='Debug message:',summarize=100)
 
         # Randomly flip the image horizontally.
         dst_image, bboxes = tf_image.random_flip_left_right(dst_image, bboxes)

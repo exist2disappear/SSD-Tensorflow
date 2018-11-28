@@ -14,23 +14,34 @@
 # ==============================================================================
 """Converts Pascal VOC data to TFRecords file format with Example protos.
 
-The raw Pascal VOC data set is expected to reside in JPEG files located in the
-directory 'JPEGImages'. Similarly, bounding box annotations are supposed to be
-stored in the 'Annotation directory'
-
-This TensorFlow script converts the training and evaluation data into
-a sharded data set consisting of 1024 and 128 TFRecord files, respectively.
-
-Each validation TFRecord file contains ~500 records. Each training TFREcord
-file contains ~1000 records. Each record within the TFRecord file is a
-serialized Example proto. The Example proto contains the following fields:
-
-    image/encoded: string containing JPEG encoded image in RGB colorspace
-    image/height: integer, image height in pixels
-    image/width: integer, image width in pixels
-    image/channels: integer, specifying the number of channels, always 3
-    image/format: string, specifying the format, always'JPEG'
-
+{
+        "name": "b1c66a42-6f7d68ca.jpg",
+        "attributes": {
+            "weather": "overcast",
+            "scene": "city street",
+            "timeofday": "daytime"
+        },
+        "timestamp": 10000,
+        "labels": [
+            {
+                "category": "traffic sign",
+                "attributes": {
+                    "occluded": false,
+                    "truncated": false,
+                    "trafficLightColor": "none"
+                },
+                "manualShape": true,
+                "manualAttributes": true,
+                "box2d": {
+                    "x1": 1000.698742,
+                    "y1": 281.992415,
+                    "x2": 1040.626872,
+                    "y2": 326.91156
+                },
+                "id": 0
+            },....
+         ]
+}
 
     image/object/bbox/xmin: list of float specifying the 0+ human annotated
         bounding boxes
@@ -53,21 +64,34 @@ import random
 import numpy as np
 import tensorflow as tf
 import cv2
-import xml.etree.ElementTree as ET
+import json
+import numpy as np
 
 from datasets.dataset_utils import int64_feature, float_feature, bytes_feature
-from datasets.pascalvoc_common import VOC_LABELS
+
 
 # Original dataset organisation.
-DIRECTORY_ANNOTATIONS = 'Annotations/'
-DIRECTORY_IMAGES = 'JPEGImages/'
 
-# TFRecords convertion parameters.
-RANDOM_SEED = 4242
+#dirimg = "images/100k/val/"
+dirimg = "images/100k/train/"
+labelfile ="labels/bdd100k_labels_images_train.json"
 SAMPLES_PER_FILES = 200
+BDD100K_LABELS = {
+    'none': (0, 'Background'),
+    'motor': (1, 'Vehicle'),
+    'rider': (2, 'Vehicle'),
+    'car': (3, 'Vehicle'),
+    'traffic sign': (4, 'Traffic'),
+    'traffic light': (5, 'Traffic'),
+    'bus': (6, 'Vehicle'),
+    'train': (7, 'Vehicle'),
+    'truck': (8, 'Vehicle'),
+    'bike': (9, 'Vehicle'),
+    'person': (10, 'Person'),
+}
 
 
-def _process_image(directory, name):
+def _process_image(directory, labeljson):
     """Process a image and annotation file.
 
     Args:
@@ -79,49 +103,44 @@ def _process_image(directory, name):
       width: integer, image width in pixels.
     """
     # Read the image file.
-    filename = directory + DIRECTORY_IMAGES + name + '.jpg'
-    print("READ FROM",filename)
-    #image_data = tf.gfile.FastGFile(filename, 'r').read()
-    image_data = cv2.imread(filename).astype(np.uint8)
-    image_data = cv2.resize(image_data,(370,370))
+    filename = directory + labeljson['name']
+    image2 = cv2.imread(filename).astype(np.uint8)
+    image2 =  np.array(image2)
+    image_data = image2[...,[2,1,0]]
+    print(image_data.shape)
+    #image_data = cv2.resize(image_data,(1280,720))
     image_data= image_data.tostring()
-    # Read the XML annotation file.
-    filename = os.path.join(directory, DIRECTORY_ANNOTATIONS, name + '.xml')
-    tree = ET.parse(filename)
-    root = tree.getroot()
-
+    
+    imglabels=labeljson['labels']
+        
     # Image shape.
-    size = root.find('size')
-    shape = [int(size.find('height').text),
-             int(size.find('width').text),
-             int(size.find('depth').text)]
+    shape = [720,
+             1280,
+             3]
     # Find annotations.
     bboxes = []
     labels = []
     labels_text = []
     difficult = []
     truncated = []
-    print(shape)
-    for obj in root.findall('object'):
-        label = obj.find('name').text
-        labels.append(int(VOC_LABELS[label][0]))
-        labels_text.append(label.encode('ascii'))
-
-        if obj.find('difficult'):
-            difficult.append(int(obj.find('difficult').text))
-        else:
+    for label in imglabels:
+        if 'box2d' in label:
+            box = label['box2d']
+            bboxes.append((float(box['y1']) / shape[0],
+                       float(box['x1']) / shape[1],
+                       float(box['y2']) / shape[0],
+                       float(box['x2']) / shape[1]
+                       ))   
+    
+            labelname = label['category']
+            labels.append(int(BDD100K_LABELS[labelname][0]))
+            labels_text.append(labelname.encode('ascii'))
             difficult.append(0)
-        if obj.find('truncated'):
-            truncated.append(int(obj.find('truncated').text))
-        else:
             truncated.append(0)
+        
+            
 
-        bbox = obj.find('bndbox')
-        bboxes.append((float(bbox.find('ymin').text) / shape[0],
-                       float(bbox.find('xmin').text) / shape[1],
-                       float(bbox.find('ymax').text) / shape[0],
-                       float(bbox.find('xmax').text) / shape[1]
-                       ))
+        
     return image_data, shape, bboxes, labels, labels_text, difficult, truncated
 
 
@@ -169,7 +188,7 @@ def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
     return example
 
 
-def _add_to_tfrecord(dataset_dir, name, tfrecord_writer):
+def _add_to_tfrecord(dataset_dir, label, tfrecord_writer):
     """Loads data from image and annotations files and add them to a TFRecord.
 
     Args:
@@ -178,7 +197,7 @@ def _add_to_tfrecord(dataset_dir, name, tfrecord_writer):
       tfrecord_writer: The TFRecord writer to use for writing.
     """
     image_data, shape, bboxes, labels, labels_text, difficult, truncated = \
-        _process_image(dataset_dir, name)
+        _process_image(dataset_dir, label)
     example = _convert_to_example(image_data, labels, labels_text,
                                   bboxes, shape, difficult, truncated)
     tfrecord_writer.write(example.SerializeToString())
@@ -188,7 +207,7 @@ def _get_output_filename(output_dir, name, idx):
     return '%s/%s_%03d.tfrecord' % (output_dir, name, idx)
 
 
-def run(dataset_dir, output_dir, name='voc_train', shuffling=False):
+def run(dataset_dir, output_dir, name='bdd_train', shuffling=False):
     """Runs the conversion operation.
 
     Args:
@@ -198,28 +217,35 @@ def run(dataset_dir, output_dir, name='voc_train', shuffling=False):
     if not tf.gfile.Exists(dataset_dir):
         tf.gfile.MakeDirs(dataset_dir)
 
-    # Dataset filenames, and shuffling.
-    path = os.path.join(dataset_dir, DIRECTORY_ANNOTATIONS)
-    filenames = sorted(os.listdir(path))
-    if shuffling:
-        random.seed(RANDOM_SEED)
-        random.shuffle(filenames)
+    # Dataset filenames.
+    print(dataset_dir)
+    filename = os.path.join(dataset_dir, labelfile)
+    print("filename is :",filename)
+    with open(filename,'r') as load_f:
+        load_dict = json.load(load_f)
+    
 
     # Process dataset files.
+
+    
+    
+    
+    
+    ###################################################################
     i = 0
     fidx = 0
-    while i < len(filenames):
+    while i < len(load_dict):
         # Open new TFRecord file.
         tf_filename = _get_output_filename(output_dir, name, fidx)
         with tf.python_io.TFRecordWriter(tf_filename) as tfrecord_writer:
             j = 0
-            while i < len(filenames) and j < SAMPLES_PER_FILES:
-                sys.stdout.write('\r>> Converting image %d/%d' % (i+1, len(filenames)))
+            while i < len(load_dict) and j < SAMPLES_PER_FILES:
+                sys.stdout.write('\r>> Converting image %d/%d' % (i+1, len(load_dict)))
                 sys.stdout.flush()
 
-                filename = filenames[i]
-                img_name = filename[:-4]
-                _add_to_tfrecord(dataset_dir, img_name, tfrecord_writer)
+                label = load_dict[i]
+                imgdir = os.path.join(dataset_dir,dirimg)
+                _add_to_tfrecord(imgdir, label, tfrecord_writer)
                 i += 1
                 j += 1
             fidx += 1
@@ -227,4 +253,4 @@ def run(dataset_dir, output_dir, name='voc_train', shuffling=False):
     # Finally, write the labels file:
     # labels_to_class_names = dict(zip(range(len(_CLASS_NAMES)), _CLASS_NAMES))
     # dataset_utils.write_label_file(labels_to_class_names, dataset_dir)
-    print('\nFinished converting the Pascal VOC dataset!')
+    print('\nFinished converting the BDD100k dataset!')

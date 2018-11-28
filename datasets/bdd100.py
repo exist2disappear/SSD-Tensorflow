@@ -21,34 +21,37 @@ from datasets import dataset_utils
 
 slim = tf.contrib.slim
 
-VOC_LABELS = {
+BDD100K_LABELS = {
     'none': (0, 'Background'),
-    'aeroplane': (1, 'Vehicle'),
-    'bicycle': (2, 'Vehicle'),
-    'bird': (3, 'Animal'),
-    'boat': (4, 'Vehicle'),
-    'bottle': (5, 'Indoor'),
+    'motor': (1, 'Vehicle'),
+    'rider': (2, 'Vehicle'),
+    'car': (3, 'Vehicle'),
+    'traffic sign': (4, 'Traffic'),
+    'traffic light': (5, 'Traffic'),
     'bus': (6, 'Vehicle'),
-    'car': (7, 'Vehicle'),
-    'cat': (8, 'Animal'),
-    'chair': (9, 'Indoor'),
-    'cow': (10, 'Animal'),
-    'diningtable': (11, 'Indoor'),
-    'dog': (12, 'Animal'),
-    'horse': (13, 'Animal'),
-    'motorbike': (14, 'Vehicle'),
-    'person': (15, 'Person'),
-    'pottedplant': (16, 'Indoor'),
-    'sheep': (17, 'Animal'),
-    'sofa': (18, 'Indoor'),
-    'train': (19, 'Vehicle'),
-    'tvmonitor': (20, 'Indoor'),
+    'train': (7, 'Vehicle'),
+    'truck': (8, 'Vehicle'),
+    'bike': (9, 'Vehicle'),
+    'person': (10, 'Person'),
 }
 
+FILE_PATTERN = 'bdd100k_%s_*.tfrecord'
+ITEMS_TO_DESCRIPTIONS = {
+    'image': 'A color image of varying height and width.',
+    'shape': 'Shape of the image',
+    'object/bbox': 'A list of bounding boxes, one per each object.',
+    'object/label': 'A list of labels, one per each object.',
+}
 
-def get_split(split_name, dataset_dir, file_pattern, reader,
-              split_to_sizes, items_to_descriptions, num_classes):
-    """Gets a dataset tuple with instructions for reading Pascal VOC dataset.
+SPLITS_TO_SIZES = {
+    'train': 50110,
+    'test': 4952,
+}
+
+NUM_CLASSES = 10
+
+def get_split(split_name, dataset_dir, file_pattern=None, reader=None):
+    """Gets a dataset tuple with instructions for reading ImageNet.
 
     Args:
       split_name: A train/test split name.
@@ -61,6 +64,16 @@ def get_split(split_name, dataset_dir, file_pattern, reader,
     Returns:
       A `Dataset` namedtuple.
 
+    Raises:
+        ValueError: if `split_name` is not a valid train/test split.
+    """
+    if not file_pattern:
+        file_pattern = FILE_PATTERN
+    split_to_sizes = SPLITS_TO_SIZES
+    items_to_descriptions = ITEMS_TO_DESCRIPTIONS
+    num_classes = NUM_CLASSES
+
+    """
     Raises:
         ValueError: if `split_name` is not a valid train/test split.
     """

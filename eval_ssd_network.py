@@ -29,6 +29,11 @@ from datasets import dataset_factory
 from nets import nets_factory
 from preprocessing import preprocessing_factory
 
+import os
+tmpid = '7'
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]=tmpid
+
 slim = tf.contrib.slim
 
 # =========================================================================== #
@@ -104,6 +109,15 @@ tf.app.flags.DEFINE_boolean(
 FLAGS = tf.app.flags.FLAGS
 
 
+def flatten(x):
+    result = []
+    for el in x:
+         if isinstance(el, tuple):
+               result.extend(flatten(el))
+         else:
+               result.append(el)
+    return result
+
 def main(_):
     if not FLAGS.dataset_dir:
         raise ValueError('You must supply the dataset directory with --dataset_dir')
@@ -116,7 +130,7 @@ def main(_):
         # Dataset + SSD model + Pre-processing
         # =================================================================== #
         dataset = dataset_factory.get_dataset(
-            FLAGS.dataset_name, FLAGS.dataset_split_name, FLAGS.dataset_dir)
+            FLAGS.dataset_name, 'train', FLAGS.dataset_dir)
 
         # Get the SSD network and its anchors.
         ssd_class = nets_factory.get_network(FLAGS.model_name)
@@ -148,6 +162,7 @@ def main(_):
             [image, shape, glabels, gbboxes] = provider.get(['image', 'shape',
                                                              'object/label',
                                                              'object/bbox'])
+            image = tf.reshape(image, [370,370,3])
             if FLAGS.remove_difficult:
                 [gdifficults] = provider.get(['object/difficult'])
             else:
@@ -315,7 +330,7 @@ def main(_):
                 checkpoint_path=checkpoint_path,
                 logdir=FLAGS.eval_dir,
                 num_evals=num_batches,
-                eval_op=list(names_to_updates.values()),
+                eval_op=flatten(list(names_to_updates.values())),
                 variables_to_restore=variables_to_restore,
                 session_config=config)
             # Log time spent.
@@ -334,7 +349,7 @@ def main(_):
                 checkpoint_dir=checkpoint_path,
                 logdir=FLAGS.eval_dir,
                 num_evals=num_batches,
-                eval_op=list(names_to_updates.values()),
+                eval_op=flatten(list(names_to_updates.values())),
                 variables_to_restore=variables_to_restore,
                 eval_interval_secs=60,
                 max_number_of_evaluations=np.inf,

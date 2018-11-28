@@ -21,10 +21,18 @@ from deployment import model_deploy
 from nets import nets_factory
 from preprocessing import preprocessing_factory
 import tf_utils
+import cv2
+import time
+
+import os
+tmpid = '7'
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]='7'
 
 slim = tf.contrib.slim
 
-DATA_FORMAT = 'NCHW'
+#DATA_FORMAT = 'NCHW'
+DATA_FORMAT = 'NHWC'
 
 # =========================================================================== #
 # SSD Network flags.
@@ -132,7 +140,7 @@ tf.app.flags.DEFINE_float(
 tf.app.flags.DEFINE_string(
     'dataset_name', 'imagenet', 'The name of the dataset to load.')
 tf.app.flags.DEFINE_integer(
-    'num_classes', 21, 'Number of classes to use in the dataset.')
+    'num_classes', 11, 'Number of classes to use in the dataset.')
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'train', 'The name of the train/test split.')
 tf.app.flags.DEFINE_string(
@@ -177,6 +185,27 @@ tf.app.flags.DEFINE_boolean(
 
 FLAGS = tf.app.flags.FLAGS
 
+save_test_gt = '/data3/dyq/gttest/'+tmpid+"/"
+
+def saveDatafromTruth(image, glabels, gbboxes):
+    print(image.shape)
+    print(gbboxes.shape)
+    #image = (image - [[[R_MEAN, G_MEAN, B_MEAN]]])*SCALE
+    #image = image/SCALE+[[[R_MEAN, G_MEAN, B_MEAN]]]
+    image2=image[...,[2,1,0]]
+    image = image2.copy()
+    rboxes = gbboxes*image.shape[0]
+    #print(rboxes[1])
+                
+    for idx in range(0, gbboxes.shape[0]):
+        box = gbboxes[idx]
+        #print(int(box[1]*image.shape[1]),int(box[0]*image.shape[1]),int(box[3]*image.shape[1]),int(box[2]*image.shape[1]))
+        
+        cv2.rectangle(image,(int(box[1]*image.shape[1]),int(box[0]*image.shape[1])),(int(box[3]*image.shape[1]),int(box[2]*image.shape[1])),(255,0,0),1)
+        
+
+    save_file_full_path = save_test_gt + "gt"+str(time.time())+".png"
+    cv2.imwrite(save_file_full_path, image)
 
 # =========================================================================== #
 # Main training routine.
@@ -233,10 +262,16 @@ def main(_):
                                                              'object/label',
                                                              'object/bbox'])
             # Pre-processing image, labels and bboxes.
+            print("__________________test")
+            print(image)
+            #image = tf.reshape(image, [370,370,3])
+            image = tf.reshape(image, [720,1280,3])
+            print(image)
             image, glabels, gbboxes = \
                 image_preprocessing_fn(image, glabels, gbboxes,
                                        out_shape=ssd_shape,
                                        data_format=DATA_FORMAT)
+            #gbboxes = tf.Print(gbboxes, [gbboxes,' out of the image_preprocessing_fn'],message='Debug message:',summarize=100)
             # Encode groundtruth labels and bboxes.
             gclasses, glocalisations, gscores = \
                 ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
@@ -250,6 +285,10 @@ def main(_):
                 capacity=5 * FLAGS.batch_size)
             b_image, b_gclasses, b_glocalisations, b_gscores = \
                 tf_utils.reshape_list(r, batch_shape)
+            print("b_image:",b_image)
+            print("b_gclasses:",b_gclasses)
+            print("b_glocalisations:",b_glocalisations)
+            print("b_gscores:",b_gscores)
 
             # Intermediate queueing: unique batch computation pipeline for all
             # GPUs running the training.
@@ -359,7 +398,19 @@ def main(_):
                                            first_clone_scope))
         # Merge all summaries together.
         summary_op = tf.summary.merge(list(summaries), name='summary_op')
-
+        
+        #=============================================================#
+        #save some label
+        
+        with tf.Session() as sess:
+            coord = tf.train.Coordinator()
+            threads = tf.train.start_queue_runners(coord=coord)
+            for i in range(10):
+                npimage, npglabels, npgbboxes = sess.run([image, glabels, gbboxes])
+                #print(npimage.shape,npglabels,npgbboxes)
+                saveDatafromTruth(npimage, npglabels, npgbboxes)
+            coord.request_stop()
+            coord.join(threads)
         # =================================================================== #
         # Kicks off the training.
         # =================================================================== #
