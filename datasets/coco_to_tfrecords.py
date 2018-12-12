@@ -12,36 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Converts Pascal VOC data to TFRecords file format with Example protos.
+"""Converts coco data to TFRecords file format with Example protos.
 
-{
-        "name": "b1c66a42-6f7d68ca.jpg",
-        "attributes": {
-            "weather": "overcast",
-            "scene": "city street",
-            "timeofday": "daytime"
-        },
-        "timestamp": 10000,
-        "labels": [
-            {
-                "category": "traffic sign",
-                "attributes": {
-                    "occluded": false,
-                    "truncated": false,
-                    "trafficLightColor": "none"
-                },
-                "manualShape": true,
-                "manualAttributes": true,
-                "box2d": {
-                    "x1": 1000.698742,
-                    "y1": 281.992415,
-                    "x2": 1040.626872,
-                    "y2": 326.91156
-                },
-                "id": 0
-            },....
-         ]
-}
+{ "segmentation":
+[ # 对象的边界点（边界多边形） 
+[ 224.24,297.18,# 第一个点 x,y坐标 
+228.29,297.18, # 第二个点 x,y坐标 
+34.91,298.29, …… …… 225.34,297.55 ]
+], 
+"area": 1481.3806499999994, # 区域面积 
+"iscrowd": 0, # 
+"image_id": 397133, # 对应的图片ID（与images中的ID对应） 
+"bbox": [217.62,240.54,38.99,57.75], # 定位边框 [x,y,w,h] 
+"category_id": 44, # 类别ID（与categories中的ID对应） 
+"id": 82445 # 对象ID，因为每一个图像有不止一个对象，所以要对每一个对象编号（每个对象的ID是唯一的） },
+
 
     image/object/bbox/xmin: list of float specifying the 0+ human annotated
         bounding boxes
@@ -73,9 +58,14 @@ from datasets.dataset_utils import int64_feature, float_feature, bytes_feature
 # Original dataset organisation.
 
 #dirimg = "images/100k/val/"
-dirimg = "images/100k/train/"
-labelfile ="labels/bdd100k_labels_images_train.json"
+#dirimg = "images/100k/train/"
+#labelfile ="labels/bdd100k_labels_images_train.json"
+dirimg = "images/"
+#cocolabel = "/data1/dataset/coco/annotations/instances_val2017.json"
+labelfile = "annotations/instances_train2017.json"
+#labelfile = "annotations/instances_val2017.json"
 SAMPLES_PER_FILES = 1000
+SMALL_AREA=400
 BDD100K_LABELS = {
     'none': (0, 'Background'),
     'motor': (1, 'Vehicle'),
@@ -89,11 +79,8 @@ BDD100K_LABELS = {
     'bike': (4, 'Vehicle'),
     'person': (5, 'Person'),
 }
+coco_categories_dict={1:'person',2:'bike',3:'car',4:'motor',6:'bus',7:'train',8:'truck'}
 
-def _is_use_img(labeljson):
-    attr = labeljson['attributes']
-    
-    return attr['weather']=="clear" and attr['timeofday']=="daytime"
 
 def _process_image(directory, labeljson):
     """Process a image and annotation file.
@@ -106,50 +93,60 @@ def _process_image(directory, labeljson):
       height: integer, image height in pixels.
       width: integer, image width in pixels.
     """
+    
     # Read the image file.
     filename = directory + labeljson['name']
     image2 = cv2.imread(filename).astype(np.uint8)
     image2 =  np.array(image2)
     image_data = image2[...,[2,1,0]]
     print(image_data.shape)
-    #image_data = cv2.resize(image_data,(1280,720))
+    shape=image_data.shape
+    image_data = cv2.resize(image_data,(1280,720))
     image_data= image_data.tostring()
     
     imglabels=labeljson['labels']
         
-    # Image shape.
-    shape = [720,
-             1280,
-             3]
+    
     # Find annotations.
     bboxes = []
     labels = []
     labels_text = []
     difficult = []
     truncated = []
+    print(shape)
     for label in imglabels:
-        if 'box2d' in label:
-            labelname = label['category']
-            box = label['box2d']
+        if 'bbox' in label:
+            labelname = label['name']
+            box = label['bbox']
             if BDD100K_LABELS[labelname][1]=='Traffic':
                 print("remove traffic object")
                 continue;
             
             #append
+            #print("object:",labelname,BDD100K_LABELS[labelname][0])
             labels.append(int(BDD100K_LABELS[labelname][0]))
             labels_text.append(labelname.encode('ascii'))            
-            bboxes.append((float(box['y1']) / shape[0],
-                       float(box['x1']) / shape[1],
-                       float(box['y2']) / shape[0],
-                       float(box['x2']) / shape[1]
-                       ))               
+            bboxes.append((float(box[1]) / shape[0],
+                       float(box[0]) / shape[1],
+                       float(box[1]+box[3]) / shape[0],
+                       float(box[0]+box[2]) / shape[1]
+                       ))
+            assert(float(box[1]) / shape[0]<=1)
+            assert(float(box[0]) / shape[1]<=1)
+            assert(float(box[1]+box[3]) / shape[0]<=1)
+            assert(float(box[0]+box[2]) / shape[1]<=1)
+            """print("object:",labelname,BDD100K_LABELS[labelname][0],";box:",
+                       float(box[1]) / shape[0],
+                       float(box[0]) / shape[1],
+                       float(box[1]+box[3]) / shape[0],
+                       float(box[0]+box[2]) / shape[1])"""
             difficult.append(0)
             truncated.append(0)
         
-            
+    #print("image_data",len(image_data),len(bboxes))            
 
         
-    return image_data, shape, bboxes, labels, labels_text, difficult, truncated
+    return image_data, [720,1280,3], bboxes, labels, labels_text, difficult, truncated
 
 
 def _convert_to_example(image_data, labels, labels_text, bboxes, shape,
@@ -234,6 +231,32 @@ def run(dataset_dir, output_dir, name='bdd_train', shuffling=False):
     
 
     # Process dataset files.
+    
+    imgs = load_dict['images'] 
+    print(len(imgs))
+    imgnamedict={}
+    for img in imgs:
+        imgnamedict[img['id']]=img['file_name']    
+    print(len(imgnamedict))
+    print(len(load_dict['annotations'] ))
+    print(coco_categories_dict[1])
+
+
+    aimdict={}
+    for annotation in load_dict['annotations']:
+        if annotation['image_id'] in aimdict:
+            imglabels = aimdict[annotation['image_id']]
+        else:
+            imglabels =[]
+    
+        labeldict={}
+        if annotation['category_id'] in coco_categories_dict and annotation['iscrowd']==0 and annotation['area']>SMALL_AREA :
+            labeldict['name']=coco_categories_dict[annotation['category_id']]
+            labeldict['bbox']=annotation['bbox']
+            labeldict['area']=annotation['area']
+            imglabels.append(labeldict)
+            aimdict[annotation['image_id']] = imglabels
+    print("aimdict",len(aimdict))   
 
     
     
@@ -243,19 +266,21 @@ def run(dataset_dir, output_dir, name='bdd_train', shuffling=False):
     i = 0
     fidx = 0
     imgdir = os.path.join(dataset_dir,dirimg)
-    while i < len(load_dict):
+    labellist=[]
+    for imgid in aimdict:
+        imgname = imgnamedict[imgid]
+        labellist.append({'name':imgname,'labels':aimdict[imgid]})
+    while i < len(aimdict):
         # Open new TFRecord file.
         tf_filename = _get_output_filename(output_dir, name, fidx)
         with tf.python_io.TFRecordWriter(tf_filename) as tfrecord_writer:
             j = 0
-            while i < len(load_dict) and j < SAMPLES_PER_FILES:
-                sys.stdout.write('\r>> Converting image %d/%d' % (i+1, len(load_dict)))
+            while i < len(aimdict) and j < SAMPLES_PER_FILES:
+                sys.stdout.write('\r>> Converting image %d/%d' % (i+1, len(aimdict)))
                 sys.stdout.flush()
 
-                label = load_dict[i]
-                if not _is_use_img(label):
-                    i += 1
-                    continue
+                label = labellist[i]
+                
                 _add_to_tfrecord(imgdir, label, tfrecord_writer)
                 i += 1
                 j += 1

@@ -28,6 +28,7 @@ import tensorflow as tf
 
 from datasets import pascalvoc_to_tfrecords
 from datasets import bdd100k_to_tfrecords
+from datasets import coco_to_tfrecords
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -55,6 +56,8 @@ def main(_):
         pascalvoc_to_tfrecords.run(FLAGS.dataset_dir, FLAGS.output_dir, FLAGS.output_name)
     if FLAGS.dataset_name == 'bdd100k':
         bdd100k_to_tfrecords.run(FLAGS.dataset_dir, FLAGS.output_dir, FLAGS.output_name)
+    if FLAGS.dataset_name == 'coco':
+        coco_to_tfrecords.run(FLAGS.dataset_dir, FLAGS.output_dir, FLAGS.output_name)
     else:
         raise ValueError('Dataset [%s] was not recognized.' % FLAGS.dataset_name)
 
